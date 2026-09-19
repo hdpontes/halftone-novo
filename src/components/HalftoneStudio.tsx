@@ -42,6 +42,7 @@ type HalftonePreset = {
   dpi: number;
   fillFrame: boolean;
   removeHalo: boolean;
+  edgeSoftness: number;
 };
 
 export default function HalftoneStudio() {
@@ -81,6 +82,7 @@ export default function HalftoneStudio() {
     let lockRatio = true;
     let fillFrame = true;
     let removeHalo = false;
+    let edgeSoftness = 45;
     let isExporting = false;
 
     // --- Halftone Engine PRO RGB (AM/FM/Hybrid + White Underbase) ---
@@ -178,6 +180,8 @@ export default function HalftoneStudio() {
       $("contrastVal").textContent = ($("contrast") as HTMLInputElement).value;
       const colorTolVal = container.querySelector("#colorTolVal");
       if (colorTolVal) colorTolVal.textContent = ($("colorTol") as HTMLInputElement).value;
+      const edgeSoftnessVal = container.querySelector("#edgeSoftnessVal");
+      if (edgeSoftnessVal) edgeSoftnessVal.textContent = ($("edgeSoftness") as HTMLInputElement).value;
       const bgColorText = container.querySelector("#bgColorText");
       if (bgColorText) bgColorText.textContent = hex(sampledBgColor);
       const bgColorSwatch = container.querySelector<HTMLElement>("#bgColorSwatch");
@@ -758,6 +762,7 @@ export default function HalftoneStudio() {
       cleanupColorContaminationGlobal(imgd, bg);
       decontaminateColorBackground(imgd, bg);
       if (removeHalo) removeBackgroundHalo(imgd, bg);
+      softenAlphaEdges(imgd);
       cctx.putImageData(imgd, 0, 0);
     }
     function removeBackgroundHalo(imgd: ImageData, bg: { r: number; g: number; b: number }) {
@@ -787,6 +792,48 @@ export default function HalftoneStudio() {
           }
           if (!edge) continue;
           if (src[i + 3] < 235 || dist(src[i], src[i + 1], src[i + 2], bg) < tol) d[i + 3] = 0;
+        }
+      }
+    }
+    function softenAlphaEdges(imgd: ImageData) {
+      if (edgeSoftness <= 0) return;
+      const w = imgd.width,
+        h = imgd.height,
+        d = imgd.data;
+      const strength = clamp(edgeSoftness / 100, 0, 1);
+      const radius = strength >= 0.7 ? 2 : 1;
+      const passes = strength >= 0.8 ? 2 : 1;
+      const edgeMix = 0.22 + strength * 0.52;
+
+      for (let pass = 0; pass < passes; pass++) {
+        const src = d.slice();
+        for (let y = radius; y < h - radius; y++) {
+          for (let x = radius; x < w - radius; x++) {
+            const i = (y * w + x) * 4;
+            const a = src[i + 3];
+            if (a <= 0) continue;
+
+            let touchesTransparent = false;
+            let weightedAlpha = 0;
+            let weightedCount = 0;
+            for (let yy = y - radius; yy <= y + radius; yy++) {
+              for (let xx = x - radius; xx <= x + radius; xx++) {
+                if (xx === x && yy === y) continue;
+                const ni = (yy * w + xx) * 4;
+                const na = src[ni + 3];
+                if (na < 8) touchesTransparent = true;
+                const manhattan = Math.abs(xx - x) + Math.abs(yy - y);
+                const weight = manhattan <= 1 ? 1.35 : manhattan === 2 ? 0.8 : 0.55;
+                weightedAlpha += na * weight;
+                weightedCount += weight;
+              }
+            }
+            if (!touchesTransparent) continue;
+            const avg = weightedAlpha / Math.max(1, weightedCount);
+            const target = a * (1 - edgeMix) + avg * edgeMix;
+            const softened = Math.min(a, Math.round(target));
+            d[i + 3] = clamp(softened, 0, 255);
+          }
         }
       }
     }
@@ -1108,6 +1155,7 @@ export default function HalftoneStudio() {
         dpi,
         fillFrame,
         removeHalo,
+        edgeSoftness,
       };
     }
     function applyPreset(p: HalftonePreset) {
@@ -1127,6 +1175,8 @@ export default function HalftoneStudio() {
       ($("fillFrame") as HTMLInputElement).checked = p.fillFrame;
       removeHalo = p.removeHalo;
       ($("removeHalo") as HTMLInputElement).checked = p.removeHalo;
+      edgeSoftness = Number.isFinite(p.edgeSoftness) ? p.edgeSoftness : 45;
+      ($("edgeSoftness") as HTMLInputElement).value = String(edgeSoftness);
       if (mode === "color" && !manualBgColor) detectBorderColor(false);
       updateFileMeta();
       labels();
@@ -1269,6 +1319,14 @@ export default function HalftoneStudio() {
     });
     $("removeHalo").addEventListener("change", () => {
       removeHalo = ($("removeHalo") as HTMLInputElement).checked;
+      process();
+    });
+    $("edgeSoftness").addEventListener("input", () => {
+      edgeSoftness = Number(($("edgeSoftness") as HTMLInputElement).value);
+      labels();
+    });
+    $("edgeSoftness").addEventListener("change", () => {
+      edgeSoftness = Number(($("edgeSoftness") as HTMLInputElement).value);
       process();
     });
     container.querySelectorAll<HTMLButtonElement>("#dpiChips .chip").forEach((b) =>
@@ -1573,6 +1631,14 @@ export default function HalftoneStudio() {
             </label>
             <div className="dica">
               <b>Dica:</b> ativa uma limpeza extra na borda do recorte para tirar aquele contorno fino da cor do fundo que às vezes sobra.
+            </div>
+            <div className="row" style={{ marginTop: 10 }}>
+              <label>Suavização de borda</label>
+              <span className="val" id="edgeSoftnessVal">45</span>
+            </div>
+            <input id="edgeSoftness" type="range" min={0} max={100} defaultValue={45} step={1} />
+            <div className="miniText" style={{ marginTop: 6 }}>
+              <b>Dica:</b> aumenta a transição do recorte para reduzir serrilhado. Valores muito altos podem suavizar detalhes muito finos.
             </div>
           </div>
 
