@@ -6,12 +6,9 @@ import {
   DEFAULT_HALFTONE_SETTINGS,
   runHalftoneEngine,
   renderColorLayer,
-  renderWhiteLayer,
-  composeDtfPreview,
   embedPngDpi,
   type HalftoneAlgorithm,
   type HalftoneSettings,
-  type WhiteMode,
 } from "../lib/halftone";
 
 type HalftoneProfile = "am_conventional" | "am_ellipse" | "am_rosette" | "fm_stochastic" | "hybrid";
@@ -85,15 +82,7 @@ export default function HalftoneStudio() {
     let edgeSoftness = 45;
     let isExporting = false;
 
-    // --- Halftone Engine PRO RGB (AM/FM/Hybrid + White Underbase) ---
-    let whiteMode: WhiteMode = "none";
-    let whiteDensity = DEFAULT_HALFTONE_SETTINGS.whiteDensity;
-    let whiteChoke = DEFAULT_HALFTONE_SETTINGS.whiteChoke;
-    let whiteLpi = DEFAULT_HALFTONE_SETTINGS.whiteLpi;
-    const whiteAngle = DEFAULT_HALFTONE_SETTINGS.whiteAngle;
-    const whiteGamma = DEFAULT_HALFTONE_SETTINGS.whiteGamma;
-    let whiteDotShape: ScreenShape = DEFAULT_HALFTONE_SETTINGS.whiteDotShape;
-    let whiteAlgorithm: HalftoneAlgorithm = DEFAULT_HALFTONE_SETTINGS.whiteAlgorithm;
+    // --- Halftone Engine PRO RGB (AM/FM/Hybrid) ---
     let halftoneAlgorithm: HalftoneAlgorithm = DEFAULT_HALFTONE_SETTINGS.algorithm;
     let screenDotShape: ScreenShape = DEFAULT_HALFTONE_SETTINGS.dotShape;
     let screenLpi = DEFAULT_HALFTONE_SETTINGS.lpi;
@@ -190,10 +179,6 @@ export default function HalftoneStudio() {
       $("zoomBadge").textContent = Math.round(zoom * 100) + "%";
       const wrap = container.querySelector<HTMLElement>("#colorResidualWrap");
       if (wrap) wrap.style.display = mode === "color" ? "block" : "none";
-      const whiteDensityEl = container.querySelector("#whiteDensityVal");
-      if (whiteDensityEl) whiteDensityEl.textContent = ($("whiteDensity") as HTMLInputElement).value + "%";
-      const whiteChokeEl = container.querySelector("#whiteChokeVal");
-      if (whiteChokeEl) whiteChokeEl.textContent = ($("whiteChoke") as HTMLInputElement).value + "px";
       const profileInfo = container.querySelector("#profileInfo");
       if (profileInfo) profileInfo.textContent = `${HALFTONE_PROFILE_LABEL[halftoneProfile]} • ${screenLpi} LPI • ${screenDotShape}`;
       updateLpiAvailability();
@@ -227,9 +212,6 @@ export default function HalftoneStudio() {
         screenDotShape = "round";
         halftoneAlgorithm = "am";
       }
-      whiteAlgorithm = halftoneAlgorithm;
-      whiteDotShape = screenDotShape;
-      whiteLpi = Math.max(20, screenLpi - 2);
       labels();
     }
     function updateExportState() {
@@ -887,14 +869,6 @@ export default function HalftoneStudio() {
         blackPoint: 0,
         whitePoint: 235,
         gamma: 1.5,
-        whiteMode,
-        whiteDensity,
-        whiteChoke,
-        whiteLpi,
-        whiteAngle,
-        whiteDotShape,
-        whiteAlgorithm,
-        whiteGamma,
       };
     }
     function halftoneProRgb() {
@@ -905,16 +879,19 @@ export default function HalftoneStudio() {
       adjust(clean);
       const imgd = cctx.getImageData(0, 0, w, h);
       const settings = buildHalftoneSettingsFromUI();
-      const layers = runHalftoneEngine(imgd.data, w, h, settings);
+      const power = Number(($("removePower") as HTMLInputElement).value);
+      // Safety net: even if alpha-based background removal misses residual background pixels
+      // (left opaque), never ink them — reuses the same background classifier as removeBg() so
+      // a poorly-removed background never gets covered in solid halftone dots ("muito escura" bug).
+      const layers = runHalftoneEngine(imgd.data, w, h, settings, {
+        isProtected: (r, g, b) => residualBgCandidate(r, g, b, 255, sampledBgColor, mode, power),
+      });
       const colorCellPx = Math.max(1.1, settings.dpi / settings.lpi);
       const colorLayer = renderColorLayer(clean, layers.colorDots, colorCellPx, settings.angle);
-      const whiteCellPx = Math.max(1.1, settings.dpi / Math.max(1, settings.whiteLpi));
-      const whiteLayer = renderWhiteLayer(w, h, layers.whiteDots, layers.whiteSolidCoverage, whiteCellPx, settings.whiteAngle);
-      const preview = composeDtfPreview(colorLayer, whiteLayer, "composite");
       result.width = w;
       result.height = h;
       rctx.clearRect(0, 0, w, h);
-      rctx.drawImage(preview, 0, 0);
+      rctx.drawImage(colorLayer, 0, 0);
     }
 
     function render() {
@@ -1360,25 +1337,6 @@ export default function HalftoneStudio() {
         process();
       })
     );
-    container.querySelectorAll<HTMLButtonElement>("#whiteModeChips .chip").forEach((b) =>
-      b.addEventListener("click", () => {
-        container.querySelectorAll("#whiteModeChips .chip").forEach((x) => x.classList.remove("active"));
-        b.classList.add("active");
-        whiteMode = (b.dataset.white as WhiteMode) || "none";
-        $("whiteWrap").style.display = whiteMode === "none" ? "none" : "block";
-        process();
-      })
-    );
-    $("whiteDensity").addEventListener("input", () => {
-      whiteDensity = Number(($("whiteDensity") as HTMLInputElement).value) / 100;
-      labels();
-    });
-    $("whiteDensity").addEventListener("change", process);
-    $("whiteChoke").addEventListener("input", () => {
-      whiteChoke = Number(($("whiteChoke") as HTMLInputElement).value);
-      labels();
-    });
-    $("whiteChoke").addEventListener("change", process);
     ["removePower", "bgPower", "colorResidual", "saturation", "contrast", "colorTol"].forEach((id) => {
       const el = container.querySelector<HTMLInputElement>("#" + id);
       if (!el) return;
@@ -1712,7 +1670,7 @@ export default function HalftoneStudio() {
           <div className="section">
             <div className="sectionTitle">Motor de halftone</div>
             <div className="dica">
-              <b>Halftone PRO RGB.</b> Retícula real AM/FM/Híbrida em padrão RGB, com White Underbase opcional.
+              <b>Halftone PRO RGB.</b> Retícula real AM/FM/Híbrida em padrão RGB.
             </div>
           </div>
 
@@ -1751,39 +1709,6 @@ export default function HalftoneStudio() {
               <button className="chip" data-dpi="1200">
                 1200
               </button>
-            </div>
-          </div>
-
-          <div className="section">
-            <div className="sectionTitle">White Underbase</div>
-            <div className="dica">
-              <b>Dica:</b> gera a camada de tinta branca (base) separada da cor, para impressão DTF sobre tecidos escuros.
-            </div>
-            <div className="chips" id="whiteModeChips">
-              <button className="chip active" data-white="none">
-                Nenhum
-              </button>
-              <button className="chip" data-white="solid">
-                Sólido
-              </button>
-              <button className="chip" data-white="halftone">
-                Halftone
-              </button>
-            </div>
-            <div id="whiteWrap" style={{ display: "none", marginTop: 10 }}>
-              <div className="row" style={{ marginTop: 10 }}>
-                <label>Densidade</label>
-                <span className="val" id="whiteDensityVal">100%</span>
-              </div>
-              <input id="whiteDensity" type="range" min={0} max={100} defaultValue={100} step={1} />
-              <div className="row" style={{ marginTop: 10 }}>
-                <label>Choke (contração)</label>
-                <span className="val" id="whiteChokeVal">2px</span>
-              </div>
-              <input id="whiteChoke" type="range" min={0} max={20} defaultValue={2} step={0.5} />
-              <div className="dica">
-                <b>Dica:</b> o branco é um canal independente do alpha/cor. Choke encolhe geometricamente a base branca para evitar halo nas bordas.
-              </div>
             </div>
           </div>
 
