@@ -9,17 +9,27 @@ function makeCanvas(w: number, h: number): HTMLCanvasElement {
   return c;
 }
 
-/** Renders the color layer by "punching" dot-shaped holes out of the clean (background-removed) art. */
+/**
+ * Renders the color layer by keeping only the dot areas from the clean art.
+ * This positive mask preserves RGB halftone structure and avoids inverted dot holes.
+ */
 export function renderColorLayer(cleanArt: HTMLCanvasElement, dots: DotDescriptor[], cellPx: number, angle: number): HTMLCanvasElement {
-  const canvas = makeCanvas(cleanArt.width, cleanArt.height);
+  const w = cleanArt.width;
+  const h = cleanArt.height;
+  const mask = makeCanvas(w, h);
+  const mctx = mask.getContext("2d")!;
+  mctx.fillStyle = "#ffffff";
+  mctx.imageSmoothingEnabled = true;
+  mctx.imageSmoothingQuality = "high";
+  const cache = createDotTileCache(cellPx, cellPx * MAX_RADIUS_FACTOR, angle);
+  renderDots(mctx, dots, cache);
+
+  const canvas = makeCanvas(w, h);
   const ctx = canvas.getContext("2d")!;
   ctx.drawImage(cleanArt, 0, 0);
   ctx.save();
-  ctx.globalCompositeOperation = "destination-out";
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
-  const cache = createDotTileCache(cellPx, cellPx * MAX_RADIUS_FACTOR, angle);
-  renderDots(ctx, dots, cache);
+  ctx.globalCompositeOperation = "destination-in";
+  ctx.drawImage(mask, 0, 0);
   ctx.restore();
   return canvas;
 }
