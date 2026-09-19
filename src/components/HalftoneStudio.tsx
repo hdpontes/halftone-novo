@@ -877,13 +877,16 @@ export default function HalftoneStudio() {
         colorMode: "rgb",
         // DEFAULT_HALFTONE_SETTINGS' blackPoint/whitePoint/gamma (16/110/1.8) were tuned for a
         // single-ink luminance separation, where anything above whitePoint=110 (light/mid tones)
-        // gets ZERO coverage. Combined with the RGB engine keeping only dot areas (renderColorLayer's
-        // destination-in mask), that made every light/mid-tone color area render fully blank. RGB
-        // reproduction needs (near) the full 0-255 range mapped to coverage so light colors still
-        // get small visible dots instead of disappearing entirely.
+        // got ZERO coverage -> combined with the RGB engine keeping only dot areas (renderColorLayer's
+        // destination-in mask), light/mid-tone color areas rendered fully blank ("invisible" bug).
+        // An earlier fix used whitePoint=248/gamma=1.05 (near-linear full range), but that swung too
+        // far the other way: midtones got heavy/near-max dot coverage (merging into solid patches),
+        // making photos look much darker/heavier overall than the source ("muito escura" bug).
+        // This balanced curve keeps highlights light (small/no dots) while still reaching strong
+        // coverage only in genuine shadows.
         blackPoint: 0,
-        whitePoint: 248,
-        gamma: 1.05,
+        whitePoint: 235,
+        gamma: 1.5,
         whiteMode,
         whiteDensity,
         whiteChoke,
