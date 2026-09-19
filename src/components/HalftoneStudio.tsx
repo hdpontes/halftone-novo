@@ -875,6 +875,15 @@ export default function HalftoneStudio() {
         algorithm: halftoneAlgorithm,
         dotShape: screenDotShape,
         colorMode: "rgb",
+        // DEFAULT_HALFTONE_SETTINGS' blackPoint/whitePoint/gamma (16/110/1.8) were tuned for a
+        // single-ink luminance separation, where anything above whitePoint=110 (light/mid tones)
+        // gets ZERO coverage. Combined with the RGB engine keeping only dot areas (renderColorLayer's
+        // destination-in mask), that made every light/mid-tone color area render fully blank. RGB
+        // reproduction needs (near) the full 0-255 range mapped to coverage so light colors still
+        // get small visible dots instead of disappearing entirely.
+        blackPoint: 0,
+        whitePoint: 248,
+        gamma: 1.05,
         whiteMode,
         whiteDensity,
         whiteChoke,
